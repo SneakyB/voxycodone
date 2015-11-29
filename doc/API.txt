@@ -1,3 +1,82 @@
+IMPORTANT: Functions marked with "@@@" can have their state mutilated between contexts.
+Do NOT rely on any "defaults" for these after a context switch!
+
+Context switches can happen due to these:
+
+* sandbox.poll() was called.
+* New sandbox was created.
+* Hook finished executing.
+* Metamethod called on target sandbox.send function.
+  * This behaviour may be deprecated if it's found to be too difficult to secure.
+    Having said that, it's not a recommended practice.
+
+Quick notes on types.
+
+* b = boolean
+* f = float
+* i = integer
+  * 0i = 0-based index
+  * 1i = 1-based index
+* str = string
+* SomethingRef = an opaque reference. Even if it's an integer, do not modify it.
+* SomethingTable = a Lua table that's probably not an array.
+* something[] = a 1D array
+
+Special types:
+
+* VMTypeStr: A sandbox/VM type to make:
+  * "blind"
+  * "client"
+  * "server"
+  * "plugin"
+* TexTypeStr: A texture type which maps accordingly:
+  * "1": GL_TEXTURE_1D
+  * "2": GL_TEXTURE_2D
+  * "3": GL_TEXTURE_3D
+  * "1a": GL_TEXTURE_1D_ARRAY
+  * "2a": GL_TEXTURE_2D_ARRAY
+* TexFiltStr: Magnification and minification filters.
+  * First char: Magnification
+    * 'n': GL_NEAREST
+    * 'l': GL_LINEAR
+  * Second char: Minification. Same as above, or...
+  * Third char: Optional, sets the minification mipmap mode.
+    * If this exists, then mag filter is GL_second_MIPMAP_third
+    * Otherwise, mag filter is
+  * So basically, "nll" is GL_NEAREST min, GL_LINEAR_MIPMAP_LINEAR mag.
+* TexFmtStr: Texture format string.
+  * First char is a number denoting the number of components, from 1 to 4.
+  * Second char:
+    * "b": GL_BYTE (signed)
+    * "s": GL_SHORT (signed)
+    * "i": GL_INT (signed)
+    * "f": GL_FLOAT (signed)
+    * "ub": GL_UNSIGNED_BYTE
+    * "us": GL_UNSIGNED_SHORT
+    * "ui": GL_UNSIGNED_INT
+    * "Nb": GL_BYTE, normalised internally (signed)
+    * "Ns": GL_SHORT, normalised internally (signed)
+    * "nb": GL_UNSIGNED_BYTE, normalised internally
+    * "ns": GL_UNSIGNED_SHORT, normalised internally
+  * If it doesn't exist, don't use it.
+
+(global namespace)
+------------------
+
+data:str = bin_load(fname:str):
+	Loads the binary file "fname" and returns the data as a string.
+
+	Returns nil on error.
+
+	Errors include:
+	- root directory + filename exceeding 255 chars in length
+	  - This limit would be higher if it weren't for Windows. Fuck Windows.
+	  - As a sidenote, limit is currently checked relative to the current directory.
+	    So on Windows it can blow over the limit anyway.
+	    Solution: Use a real OS.
+
+draw
+----
 
 width:i, height:i = draw.screen_size_get():
 	Obtain the virtual screen resolution.
@@ -13,69 +92,257 @@ draw.blit():
 
 	Really only useful for raytracing.
 
-draw.buffers_set(buf_list:i[]):
+draw.buffers_set(buf_list:0i[]): @@@
 	glDrawBuffers(#buf_list, GL_COLOR_ATTACHMENT0 + buf_list);
 
 	Useful for setting up FBOs with multiple outputs.
 	
 	A good list to pass when you're done is {0}.
 
-draw.viewport_set(x:i, y:i, xlen:i, ylen:i):
+draw.viewport_set(x:i, y:i, xlen:i, ylen:i): @@@
 	glViewport(x, y, xlen, ylen);
 
 	Bottom-left origin. Measured in pixels.
 
 	You'll want to set this after switching to a different-sized render target.
 
---- TODO! ---
+fbo
+---
 
-fbo.new():
+fb:FBORef = fbo.new():
+	Create an FBO handle.
 
-fbo.bind_tex():
+fbo.bind_tex(fb:FBORef, attachment_idx:0i, texture_type:TexTypeStr, tex:TexRef, level:0i):
+	Binds a texture to an FBO.
 
-fbo.target_set():
+fbo.target_set(fb:FBORef/nil): @@@
+	Sets the current FBO.
+	nil denotes default target.
 
-fbo.validate():
+	WARNING: This tends to get overwritten by these calls:
+	* sandbox.new
 
-matrix.new():
+	It also gets explicitly set to nil on context switch.
 
-matrix.identity():
+isvalid:b = fbo.validate(fb:FBORef):
+	Checks if an FBO is valid.
 
-matrix.rotate_X():
+matrix
+------
 
-matrix.rotate_Y():
+mat:Mat4 = matrix.new():
+	Create a new 4x4 matrix.
 
-matrix.translate_in_place():
+matrix.identity(mA:Mat4):
+	Resets a matrix to the identity matrix.
 
-matrix.invert():
+matrix.rotate_X(mA:Mat4, mB:Mat4, radians:f):
+matrix.rotate_Y(mA:Mat4, mB:Mat4, radians:f):
+matrix.rotate_Z(mA:Mat4, mB:Mat4, radians:f):
+	Rotates mB around the given axis and stores the result in mA.
 
-texture.new():
+matrix.translate_in_place(mA:Mat4, dx:f, dy:f, dz:f):
+	Translates mA in-place by <dx,dy,dz>.
 
-texture.unit_set():
+matrix.invert(mA:Mat4, mB:Mat4):
+	Calculates the inverse of mB and stores the result in mA.
 
-texture.load_sub():
-
-shader.new():
-
-shader.use():
-
-shader.uniform_location_get():
-
-shader.uniform_matrix_4f():
-
-shader.uniform_f():
-
-shader.uniform_i():
-
-shader.uniform_ui():
-
-shader.uniform_fv():
+misc
+----
 
 misc.exit():
+	Sets the quit flag, allowing the program or sandbox to quit.
 
-misc.gl_error():
+	This does not immediately quit, however, so you should return ASAP.
 
-misc.mouse_grab_set():
+	PLEASE DO NOT RELY ON THAT BEHAVIOUR, IT MAY CHANGE IN FUTURE.
 
-misc.mouse_visible_set():
+err:i = misc.gl_error():
+	glGetError();
+
+	Returns the GL error state, and then resets the error code.
+
+misc.mouse_grab_set(arg:b):
+	Sets/clears mouse grab.
+
+	Also affects visibility.
+
+misc.mouse_visible_set(arg:b):
+	Sets/clears mouse visibility.
+
+sandbox
+-------
+
+vm:VMRef/nil = sandbox.new(typ:VMTypeStr, ...):
+_G:Table/nil = sandbox.new("blind", code:str):
+	Create a sandbox with the given type.
+	Returns nil on failure.
+	Returns the global table if you used a blind VM.
+	Returns a VMRef if you used a normal VM.
+
+	Arguments to be provided for each type:
+
+	* blind: A string containing Lua code to be parsed and executed.
+	* client: A string containing a hostname and an int containing a UDP port to connect to.
+	* server, plugin: A string containing a root directory relative to the current VM's path.
+
+	VMs that can be created by each type:
+
+	* blind: NONE
+	* client: blind (cannot create anything that can access anything! possible security issue)
+	* server: plugin, blind
+	* plugin: blind
+	* system: server, client, plugin, blind
+
+	Code will be run before execution.
+	For non-blind contexts, the code will be fetched from "main.lua" in the context root.
+
+tex:TexRef/nil = sandbox.fbo_get_tex(vm:VMRef):
+	Get the colour texture for the FBO used by this sandbox.
+
+	You cannot get your parent's FBO textures.
+
+	Returns nil if the sandbox doesn't have an FBO.
+
+sandbox.poll(vm:VMRef):
+	Call hook_poll on this sandbox.
+
+	No, you cannot poll your parent.
+
+sandbox.send(vm:VMRef/true, ...):
+	Sends a message to the given VM's mailbox.
+	If vm is true, send to the current VM's parent.
+
+	Arguments can be any of the following types:
+	* nil
+	* boolean
+	* string
+	* number
+	* integer
+
+	Any other types will be rejected.
+
+sandbox.mbox:
+	A table containing this VM's mailbox.
+	The mailbox directly references this.
+
+	Entries begin with the source VM
+	(or true if it comes from the parent),
+	then the arguments follow afterwards.
+
+	You can set this to pretty much anything,
+	but if it's not a table, expect it to crash.
+	(Best to just set it to an empty table after checking its contents.)
+
+shader
+------
+
+sh:ShaderRef = shader.new(srclist:ShaderTable, in_attrs:str[], out_binds:str[]):
+	ShaderTable is a table with these args:
+		vert = :str, -- Vertex shader source
+		frag = :str, -- Fragment shader source
+		geom = :str, -- Geometry shader source (optional)
+
+	Creates a new shader with the inputs and outputs bound appropriately.
+
+	Returns nil on failure.
+
+	This will be fixed before the API reaches a point
+	where I would actually care about backwards compatibility.
+
+shader.use(sh:ShaderRef/nil): @@@
+	glUseProgram(sh);
+
+	Sets the shader to be used for rendering.
+
+loc:0i = shader.uniform_location_get(sh:ShaderRef, name:str):
+	Gets the location of a uniform in a shader.
+	
+	This location can be passed to the appropriate `shader.uniform_*` function.
+
+shader.uniform_matrix_4f(loc:0i, val:Mat4):
+	Sets a matrix uniform in the current shader.
+
+shader.uniform_f(loc:0i, x:f [, y:f [, z:f [, w:f]]]): @@@
+	Sets a float|vec[234] uniform in the current shader.
+
+shader.uniform_i(loc:0i, x:f [, y:f [, z:f [, w:f]]]): @@@
+	Sets an int|ivec[234] uniform in the current shader.
+
+shader.uniform_ui(loc:0i, x:f [, y:f [, z:f [, w:f]]]): @@@
+	Sets a uint|uvec[234] uniform in the current shader.
+
+shader.uniform_fv(loc:0i, elements:i, dims:i in [1,4], data:f[]): @@@
+	Sets a float|vec[234] uniform array in the current shader.
+
+shader.uniform_iv(loc:0i, elements:i, dims:i in [1,4], data:f[]): @@@
+	Sets an int|ivec[234] uniform array in the current shader.
+
+shader.uniform_uiv(loc:0i, elements:i, dims:i in [1,4], data:f[]): @@@
+	Sets a uint|uvec[234] uniform array in the current shader.
+
+texture
+-------
+
+tex:TexRef = texture.new(target:TexTypeStr, levels:i, int_fmt:TexFmtStr,
+		xsize:i [, ysize:i [, zsize:i]],
+		filt:TexFiltStr,
+		fmt:TexFmtStr
+		):
+
+	Creates a new texture.
+
+	"fmt" is there to make this behave with glTexImage*D without throwing an error.
+	The issue doesn't occur when we use glTexStorage*D, but that's core in 4.2.
+	It may be available in an extension, but DO NOT ASSUME THAT EVERYONE HAS IT!
+
+	(If in doubt, set fmt to the same thing as int_fmt.)
+
+texture.unit_set(unit:0i, target:TexTypeStr, tex:TexRef): @@@
+	Sets a texture unit to a given texture.
+
+	WARNING: This tends to get overwritten by these calls:
+	* sandbox.new
+	* texture.new
+	* texture.load_sub
+	* texture.gen_mipmaps
+
+	GL_ARB_direct_state_access is only core since GL 4.5,
+	so we cannot assume everyone has it.
+
+texture.load_sub(tex:TexRef, target:TexTypeStr, level:i,
+		xoffs:i [, yoffs:i [, zoffs: i]],
+		xsize:i [, ysize:i [, zsize: i]],
+		fmt:TexFmtStr, data:*[]
+		):
+
+	Loads data into a texture.
+
+	"data" is a 1D array which matches the texture format and size.
+	It should have elems*xsize*ysize*zsize elements.
+
+	Elements should be Lua floats for floating-point data,
+	and Lua ints for integer data (regardless of sign).
+
+texture.gen_mipmaps(tex:TexRef, target:TexTypeStr):
+	Generates mipmaps for a texture using glGenerateMipmap.
+
+voxel
+-----
+
+voxels:i[levels][] = voxel.decode_chunk(data:str, levels:i, chunkshift:i):
+	ACCEL FUNCTION
+
+	Decodes an SVO chunk into arrays.
+
+	FIXME: Some arguments are unused and assume defaults (data, 5, 7).
+
+voxel.upload_chunk_repeated(voxels:i[levels][], levels:i, chunkshift:i, xztexshift:i):
+	ACCEL FUNCTION
+
+	DEPRECATED API.
+
+	Loads a chunk and repeats it over a 3D texture.
+
+	FIXME: Some arguments are unused and assume defaults (voxels, 5, 7, 9).
 

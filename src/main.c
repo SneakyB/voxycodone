@@ -4,6 +4,8 @@
 #include <windows.h>
 #endif
 
+int context_is_compat = false;
+
 SDL_Window *window;
 SDL_GLContext window_gl;
 int do_exit = false;
@@ -41,9 +43,22 @@ int main(int argc, char *argv[])
 	SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_NOPARACHUTE);
 	Mix_Init(MIX_INIT_OGG);
 
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+	/*if(!epoxy_has_gl_extension("GL_EXT_gpu_shader4"))
+	{
+		context_is_compat = true;
+	}*/
+
+	if(context_is_compat)
+	{
+		printf("Forcing COMPAT profile\n");
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+	} else {
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+	}
 
 	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
 	SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
@@ -56,6 +71,7 @@ int main(int argc, char *argv[])
 	window = SDL_CreateWindow("Voxycodone prealpha",
 		SDL_WINDOWPOS_UNDEFINED,
 		SDL_WINDOWPOS_UNDEFINED,
+		//1920, 1080,
 		1280, 720,
 		//800, 500,
 		//640, 360,
@@ -64,9 +80,34 @@ int main(int argc, char *argv[])
 		SDL_WINDOW_OPENGL);
 
 	window_gl = SDL_GL_CreateContext(window);
-	SDL_GL_SetSwapInterval(0); // disable vsync, this is a benchmark
+	if(window_gl == NULL)
+	{
+		if(!context_is_compat)
+		{
+			printf("COULD NOT CREATE CORE CONTEXT! Falling back to GL 2.1 compat.\n");
+			SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+			SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+			SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+
+			window_gl = SDL_GL_CreateContext(window);
+		}
+
+		if(window_gl == NULL)
+		{
+			printf("*** FATAL - COULD NOT CREATE OPENGL 2.1 COMPAT OR OPENGL 3.2 CORE CONTEXT.\n");
+			return 1;
+		}
+	}
+
+	SDL_GL_SetSwapInterval(0); // disable vsync
 	//SDL_GL_SetSwapInterval(-1); // late swap tearing if you want it
-	printf("GL version %i\n", epoxy_gl_version());
+	int glver = epoxy_gl_version();
+	printf("GL version %i\n", glver);
+	if(glver < 30)
+	{
+		printf("SWITCHING TO COMPAT PROFILE\n");
+		context_is_compat = true;
+	}
 
 #ifndef WIN32
 	signal(SIGINT, SIG_DFL);
@@ -81,22 +122,14 @@ int main(int argc, char *argv[])
 	int fps = 0;
 	char hands = '/';
 
-	// TODO: move this to Lua somehow {
-	// Get textures from Lua state
-	lua_getglobal(Lbase, "tex_ray_vox"); tex_ray_vox = lua_tointeger(Lbase, -1); lua_pop(Lbase, 1);
-
-	// Send voxel landscape
-	glBindTexture(GL_TEXTURE_3D, tex_ray_vox);
-	voxygen_load_repeated_chunk("dat/voxel1.voxygen");
-	glBindTexture(GL_TEXTURE_3D, 0);
-	// }
-
 	Mix_OpenAudio(44100, AUDIO_S16SYS, 2, 4096);
+
 	// TODO: clean this up {
 	//Mix_Chunk *music = Mix_LoadWAV("dat/ds15rel-gm.ogg");
 	//int music_chn = Mix_PlayChannel(-1, music, 0);
 	// }
 
+	if(!do_exit)
 	for(;;)
 	{
 		SDL_Event ev;
@@ -171,6 +204,9 @@ int main(int argc, char *argv[])
 		//SDL_Delay(10);
 #endif
 	}
+
+	// Clean up
+	free(lua_getextraspace(Lbase));
 
 	return 0;
 }
